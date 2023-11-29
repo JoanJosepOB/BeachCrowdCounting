@@ -44,7 +44,7 @@ def load_data(directory: str):
 
 
 # original_img = image_stack[idx]
-def compute_tophat(original_img, empty_img):
+def compute_differences(original_img, empty_img):
     clahe = cv2.createCLAHE(clipLimit=1)
 
     empty_img_ = empty_img.copy()
@@ -62,10 +62,10 @@ def compute_tophat(original_img, empty_img):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, kernelSize)
     tophat = cv2.morphologyEx(diff, cv2.MORPH_TOPHAT, kernel)
 
-    return tophat, diff
+    return tophat
 
 
-def detection_mask(image, tophat):
+def skin_based_mask(image, tophat):
     edges = cv2.Canny(image=tophat, threshold1=100, threshold2=200)
 
     dilated = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 10)))
@@ -86,13 +86,7 @@ def detection_mask(image, tophat):
 
     # mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3,10)))
 
-    result = np.copy(image)
-    result[0][mask == 255] = 0
-    result[1][mask == 255] = 255
-    result[2][mask == 255] = 0
-    result = np.transpose(result, (1, 2, 0))
-
-    return result, mask[440:, :]
+    return mask[440:, :]
 
 
 def skin_color_filter(image):
@@ -266,7 +260,7 @@ def find_people_sec(image_list):
     return p_sector_list
 
 
-def find_people(tophat_img):
+def sector_based_mask(tophat_img):
     # Cut mountain, boats and sky
     image_cut = tophat_img[440:, :].copy()
 
@@ -296,12 +290,6 @@ def get_outline_img(img):
     kernelSize_close = (3, 3)
     kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, kernelSize_close)
     return cv2.morphologyEx(img, cv2.MORPH_GRADIENT, kernel_close)
-
-
-# mask, msk
-# msk_cut = msk[440:,:].copy()
-def and_combine_masks(msk1, msk2):
-    return cv2.bitwise_and(msk1, msk2)
 
 
 # color in (R,G,B)
@@ -349,6 +337,19 @@ def filter_regions(image, mask):
     return result
 
 
+def mask_combiner(skin_based_msk, sector_based_msk):
+    intermediate_mask = cv2.bitwise_and(sector_based_msk, skin_based_msk)
+
+    sea_mask = cv2.imread('res/beach_mask.png', cv2.IMREAD_GRAYSCALE)
+    sea_detections = cv2.bitwise_and(sea_mask, sector_based_msk)
+
+    intermediate_mask = cv2.bitwise_or(sea_detections, intermediate_mask)
+
+    resulting_mask = filter_regions(sector_based_msk, intermediate_mask)
+
+    return resulting_mask
+
+
 def compute_centroids(bin_img):
     centroids = []
 
@@ -372,28 +373,16 @@ def compute_centroids(bin_img):
 
 def analyze_image(image_color):
     empty_beach = cv2.imread('res/empty_beach.jpg', cv2.IMREAD_GRAYSCALE)
-    beach_mask = cv2.imread('res/beach_mask.png', cv2.IMREAD_GRAYSCALE)
+    image_gray = cv2.cvtColor(np.transpose(image_color, (1, 2, 0)), cv2.COLOR_RGB2GRAY)
 
-    image_gray = cv2.cvtColor(np.transpose(image_color, (1,2,0)), cv2.COLOR_RGB2GRAY)
+    differences = compute_differences(image_gray, empty_beach)
+    skin_based_msk = skin_based_mask(image_color, differences)
+    sector_based_msk = sector_based_mask(differences)
+    resulting_msk = mask_combiner(skin_based_msk, sector_based_msk)
 
-    tophat, diff = compute_tophat(image_gray, empty_beach)
+    centroids = compute_centroids(resulting_msk)
 
-    _, detection_msk = detection_mask(image_color, tophat)
-    #results_method_1.append(apply_mask_outline_to_img(image_color, detection_msk, np.array([255, 0, 0])))
-
-    people_mask = find_people(tophat)
-    sea_people = cv2.bitwise_and(beach_mask, people_mask)
-    #results_method_2.append(apply_mask_outline_to_img(image_color, people_mask, np.array([255, 0, 0])))
-
-    intermediate_mask = and_combine_masks(people_mask, detection_msk)
-    intermediate_mask = cv2.bitwise_or(sea_people, intermediate_mask)
-    #results_and_1_2.append(apply_mask_outline_to_img(image_color, intermediate_mask, np.array([255, 0, 0])))
-
-    resulting_mask = filter_regions(people_mask, intermediate_mask)
-    #final_masks.append(resulting_mask)
-    result_image = apply_mask_outline_to_img(image_color, resulting_mask, np.array([255, 0, 0]))
-
-    centroids = compute_centroids(resulting_mask)
+    result_image = apply_mask_outline_to_img(image_color, resulting_msk, np.array([255, 0, 0]))
 
     return result_image, centroids
 
