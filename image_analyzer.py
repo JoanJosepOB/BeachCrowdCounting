@@ -48,9 +48,11 @@ def compute_differences(original_img, empty_img):
     clahe = cv2.createCLAHE(clipLimit=1)
 
     empty_img_ = empty_img.copy()
+    empty_img_ = cv2.GaussianBlur(empty_img_, (3, 3), 0) # Slight improvement of accuracy
     empty_img_[0:440, :] = 0
 
     image_mod_ = original_img.copy()
+    image_mod_ = cv2.GaussianBlur(image_mod_, (3, 3), 0)
     image_mod_[0:440, :] = 0
 
     empty_image_ = clahe.apply(empty_img_)
