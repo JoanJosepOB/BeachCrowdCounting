@@ -82,7 +82,7 @@ def skin_based_mask(image, tophat):
 
     image_used = np.transpose(image_used, (1, 2, 0))
 
-    mask = skin_color_filter(image_used)
+    mask = skin_color_filter(image_used, cv2.COLOR_RGB2YCR_CB)
 
     # mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (7,7)))
 
@@ -91,17 +91,37 @@ def skin_based_mask(image, tophat):
     return mask[440:, :]
 
 
-def skin_color_filter(image):
-    min_YCrCb = np.array([0, 133, 77], np.uint8)
-    max_YCrCb = np.array([235, 173, 127], np.uint8)
+def skin_color_filter(image, palette):
 
-    # img2 = cv2.imread("images/{}".format(images[5]), cv2.IMREAD_COLOR)
-    imageYCrCb = cv2.cvtColor(image, cv2.COLOR_RGB2YCR_CB)
-    skinRegionYCrCb = cv2.inRange(imageYCrCb, min_YCrCb, max_YCrCb)
+    if palette == cv2.COLOR_RGB2YCR_CB:
+        min_YCrCb = np.array([0, 133, 77], np.uint8)
+        max_YCrCb = np.array([235, 173, 127], np.uint8)
 
-    # skinYCrCb = cv2.bitwise_and(image, image, mask=skinRegionYCrCb)
+        imageYCrCb = cv2.cvtColor(image, cv2.COLOR_RGB2YCR_CB)
+        skinRegion = cv2.inRange(imageYCrCb, min_YCrCb, max_YCrCb)
+    elif palette == cv2.COLOR_RGB2HSV:
+        min_hsv = np.array([0, 51, 102], np.uint8)
+        max_hsv = np.array([25 // 2, 153, 255], np.uint8)
 
-    return skinRegionYCrCb
+        imageHSV = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        skinRegion = cv2.inRange(imageHSV, min_hsv, max_hsv)
+
+        # 2 steps
+        min_hsv = np.array([335 // 2, 51, 102], np.uint8)
+        max_hsv = np.array([360 // 2, 153, 255], np.uint8)
+        skinRegion = cv2.bitwise_or(skinRegion, cv2.inRange(imageHSV, min_hsv, max_hsv))
+    else:
+        min_rgb = np.array([96, 0, 41], np.uint8)
+        max_rgb = np.array([255, 39, 255], np.uint8)
+
+        imageRGB = np.copy(image)
+        skinRegion = cv2.inRange(imageRGB, min_rgb, max_rgb)
+        skinRegion = 255*cv2.bitwise_and(skinRegion, np.array((np.max(imageRGB, axis=2) - np.min(imageRGB, axis=2)) > 15, dtype="uint8"))
+        skinRegion = 255*cv2.bitwise_and(skinRegion, np.array(np.abs(imageRGB[:, :, 0] - imageRGB[:, :, 1]) > 15, dtype="uint8"))
+        skinRegion = 255*cv2.bitwise_and(skinRegion, np.array((imageRGB[:, :, 0] > imageRGB[:, :, 1]), dtype="uint8"))
+        skinRegion = 255*cv2.bitwise_and(skinRegion, np.array((imageRGB[:, :, 0] > imageRGB[:, :, 2]), dtype="uint8"))
+
+    return skinRegion
 
 
 # ------------------------------------------------------------
@@ -344,7 +364,6 @@ def mask_combiner(skin_based_msk, sector_based_msk):
 
     sea_mask = cv2.imread('res/beach_mask.png', cv2.IMREAD_GRAYSCALE)
     sea_detections = cv2.bitwise_and(sea_mask, sector_based_msk)
-
     intermediate_mask = cv2.bitwise_or(sea_detections, intermediate_mask)
 
     resulting_mask = filter_regions(sector_based_msk, intermediate_mask)
@@ -385,6 +404,7 @@ def analyze_image(image_color):
     centroids = compute_centroids(resulting_msk)
 
     result_image = apply_mask_outline_to_img(image_color, resulting_msk, np.array([255, 0, 0]))
+    result_image = np.ascontiguousarray(result_image)
 
     return result_image, centroids
 
